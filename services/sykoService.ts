@@ -1,19 +1,20 @@
 import { Message } from '../types';
 
 // ============================================================================
-// 🛠️ HUGGING FACE AYARLARI
+// 🛠️ MODEL VE AYARLAR
 // ============================================================================
 
 // Senin Model ID'n:
 const HF_MODEL_ID = "syko818121/SykoLLM-V2.5-Thinking-Beta";
 
-// Modelin Kişiliği (System Prompt)
+// Modelin Kişiliği (System Prompt) - Bunu agresif yapıyorum ki model olduğunu kanıtlasın.
 const SYSTEM_INSTRUCTION = `
-You are SykoLLM, an advanced AI developed by Syko AI.
-You are currently in Beta v2.5.
-You are helpful, dark-themed, and intelligent.
-You prefer a concise, hacker-like, cool tone.
-Do not mention being a language model unless asked.
+You are SykoLLM. YOU ARE NOT GEMINI. YOU ARE NOT OPENAI.
+You are a custom AI model created by Syko AI.
+Your version is V2.5 Thinking Beta.
+You are dark, edgy, minimalist, and extremely intelligent.
+Answer briefly and coolly.
+If asked "Who are you?", reply: "I am SykoLLM V2.5, running on custom weights."
 `;
 
 // ============================================================================
@@ -25,11 +26,15 @@ export const streamResponse = async (
 ): Promise<string> => {
   
   const apiKey = process.env.API_KEY;
+
+  // 1. KESİN KONTROL: Anahtar 'hf_' ile başlamıyorsa işlemi hemen durdur.
   if (!apiKey || !apiKey.startsWith('hf_')) {
-    console.error("API Key Hatası: Hugging Face token'ı eksik.");
+    const errorMsg = "⛔ HATALI ANAHTAR TESPİT EDİLDİ!\n\nŞu an 'API_KEY' olarak Google (Gemini) şifresi girili görünüyor. \n\nBu model Hugging Face üzerindedir. Lütfen .env dosyanı veya Vercel ayarlarını aç, 'hf_' ile başlayan Hugging Face Token'ını yapıştır.";
+    console.error(errorMsg);
+    throw new Error(errorMsg);
   }
 
-  // 1. Prompt Formatlama
+  // 2. Prompt Hazırlama (ChatML Formatı)
   let fullPrompt = `<|im_start|>system\n${SYSTEM_INSTRUCTION}<|im_end|>\n`;
 
   history.forEach((msg) => {
@@ -38,10 +43,9 @@ export const streamResponse = async (
 
   fullPrompt += `<|im_start|>assistant\n`;
 
-  // ⚠️ GÜVENLİK ÖNLEMİ: Timeout (Zaman Aşımı)
-  // Eğer model 45 saniye içinde hiç cevap vermezse bağlantıyı keseriz.
+  // 3. İstek Gönderme
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 saniye bekleme süresi
 
   try {
     const response = await fetch(
@@ -52,14 +56,14 @@ export const streamResponse = async (
           "Content-Type": "application/json",
         },
         method: "POST",
-        signal: controller.signal, // Timeout sinyali
+        signal: controller.signal,
         body: JSON.stringify({
           inputs: fullPrompt,
           parameters: {
-            max_new_tokens: 512, // Model kötü olduğu için çok uzun yazmasına izin vermeyelim, saçmalayabilir.
-            temperature: 0.6,    // Daha tutarlı olması için yaratıcılığı biraz kıstım.
+            max_new_tokens: 1024,
+            temperature: 0.7,
             top_p: 0.9,
-            repetition_penalty: 1.2, // Sürekli aynı şeyi tekrarlamasını engeller.
+            repetition_penalty: 1.1,
             return_full_text: false,
           },
           stream: true,
@@ -67,23 +71,22 @@ export const streamResponse = async (
       }
     );
 
-    clearTimeout(timeoutId); // Bağlantı başarılı, sayacı durdur.
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errText = await response.text();
       if (errText.includes("currently loading")) {
-         throw new Error("⏳ Model şu an uyanıyor (Cold Boot). Hugging Face ücretsiz sunucularında modeller kullanılmadığında uyku moduna geçer. Lütfen 30 saniye bekleyip tekrar dene.");
+         throw new Error("⏳ Model Uyanıyor... Hugging Face modelleri kullanılmadığında uyur. Lütfen 30 saniye sonra tekrar dene.");
       }
-      throw new Error(`Model Hatası (${response.status}): ${errText}`);
+      throw new Error(`Hugging Face Hatası (${response.status}): ${errText}`);
     }
 
-    if (!response.body) throw new Error("Model boş yanıt döndürdü.");
+    if (!response.body) throw new Error("Yanıt boş geldi.");
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let done = false;
     let finalOutput = "";
-    let chunkCount = 0;
 
     while (!done) {
       const { value, done: readerDone } = await reader.read();
@@ -99,36 +102,29 @@ export const streamResponse = async (
             
             try {
               const data = JSON.parse(jsonStr);
-              const textFragment = data.token?.text || ""; 
+              // Hugging Face standardı: token.text
+              let textFragment = data.token?.text || ""; 
               
-              // Bazı modeller özel tokenları metin gibi basar, onları filtreleyelim
-              if (textFragment && !textFragment.includes('<|im_end|>')) {
+              // Temizlik
+              if (textFragment.includes('<|im_end|>')) textFragment = textFragment.replace('<|im_end|>', '');
+              
+              if (textFragment) {
                 finalOutput += textFragment;
                 onChunk(textFragment);
-                chunkCount++;
               }
             } catch (e) {
-              // Yut
+              // JSON hatası olursa yut
             }
           }
         }
       }
     }
 
-    if (chunkCount === 0 && finalOutput.length === 0) {
-        throw new Error("Model bağlandı ama sessiz kaldı (Boş yanıt). Modelin eğitimi henüz tamamlanmamış olabilir.");
-    }
-
     return finalOutput;
 
   } catch (error: any) {
     clearTimeout(timeoutId);
-    console.error("SykoLLM Hatası:", error);
-    
-    if (error.name === 'AbortError') {
-        throw new Error("Zaman aşımı: Model çok yavaş yanıt veriyor veya takıldı.");
-    }
-    
+    console.error("SykoLLM Service Error:", error);
     throw error;
   }
 };
