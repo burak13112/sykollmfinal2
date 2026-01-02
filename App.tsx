@@ -6,8 +6,7 @@ import { ModelSelector } from './components/ModelSelector';
 import { ChatMessage } from './components/ChatMessage';
 
 const MODELS: ModelConfig[] = [
-  { id: 'syko-v1-alpha', name: 'SykoLLM', tag: 'ALPHA', description: 'Our fastest, most efficient model for general tasks.' },
-  { id: 'syko-v1-pro', name: 'SykoLLM Pro', tag: 'PREVIEW', description: 'Enhanced reasoning capabilities for complex problems.' },
+  { id: 'syko-v2.5', name: 'SykoLLM', tag: 'V2.5', description: 'Thinking Beta (Custom Weights)' },
 ];
 
 export default function App() {
@@ -38,8 +37,6 @@ export default function App() {
     if (savedSessions) {
       const parsed = JSON.parse(savedSessions);
       setSessions(parsed);
-      // Don't auto-load a session, start fresh by default or load last used?
-      // Let's start fresh to keep it clean.
     }
   }, []);
 
@@ -152,43 +149,39 @@ export default function App() {
             : msg
         ));
       });
-
-      // Update session with final response
-      setSessions(prev => prev.map(s => {
-        if (s.id === currentSessionId) {
-           // We need to get the latest state of messages here effectively
-           // Since setMessages is async, let's grab the latest state updater logic or simpler:
-           // We trigger a re-save after streaming is done using the current functional state
-           return s; 
-        }
-        return s;
-      }));
       
-    } catch (error) {
+    } catch (error: any) {
+       console.error("Chat Error:", error);
+       
+       let errorMessage = "Bağlantı Hatası";
+
+       // Hata mesajlarını kullanıcı dostu yap
+       if (error.message?.includes("HATALI ANAHTAR")) {
+         errorMessage = error.message; // Direkt servis dosyasından gelen hatayı göster
+       } else if (error.message?.includes("Model Uyanıyor")) {
+          errorMessage = error.message;
+       } else {
+          errorMessage = `Bir hata oluştu: ${error.message}`;
+       }
+
        setMessages(prev => [...prev, {
          id: Date.now().toString(),
          role: 'model',
-         content: "Connection to SykoLLM Alpha failed. Please check your network or try again.",
+         content: errorMessage,
          timestamp: Date.now(),
          isError: true
        }]);
     } finally {
       setIsTyping(false);
-      // Final save to capture the full AI response in storage
-      // Note: In a real app we'd use a better state sync, but for this simpler version:
-      // We rely on the effect hook on 'messages' or manually sync here.
-      // Let's rely on user action or next render cycle for perfect consistency, 
-      // but to ensure persistence, we force update the session in the sessions array:
+      // Ensure persistence
       setSessions(prevSessions => {
-         // This is a bit tricky inside the async closure, but sufficient for this demo
-         // to update the session with the latest messages state content if we had access to it easily.
-         // Instead, we will let the user 'Save' manually or auto-save on next interaction.
-         return prevSessions; 
+         // Force update purely for session storage sync
+         return [...prevSessions]; 
       });
     }
   };
 
-  // Sync messages to current session when messages change (Auto-save mechanism)
+  // Sync messages to current session
   useEffect(() => {
     if (currentSessionId && messages.length > 0) {
       setSessions(prev => prev.map(s => 
@@ -277,7 +270,7 @@ export default function App() {
              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-[10px] text-white font-bold">
                S
              </div>
-             <span className="text-xs font-mono">SykoLLM v1.02</span>
+             <span className="text-xs font-mono">SykoLLM v2.5</span>
           </div>
         </div>
       </aside>
@@ -311,19 +304,17 @@ export default function App() {
               <div className="w-16 h-16 bg-black dark:bg-white rounded-2xl flex items-center justify-center mb-6 shadow-xl">
                  <Icons.Cpu size={32} className="text-white dark:text-black" />
               </div>
-              <h2 className="text-2xl font-bold mb-2">Welcome to SykoLLM</h2>
+              <h2 className="text-2xl font-bold mb-2">Welcome to SykoLLM v2.5</h2>
               <p className="opacity-60 max-w-md">
-                Experience the power of our Alpha model. Fast, efficient, and strictly minimal.
+                Connecting to Hugging Face Model: SykoLLM-V2.5-Thinking-Beta
               </p>
               
               <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
-                {["Explain quantum computing", "Write a python script", "Analyze this logic", "Write a poem about darkness"].map((suggestion) => (
+                {["Who are you?", "System status", "Analyze this code", "Tell me a secret"].map((suggestion) => (
                   <button
                     key={suggestion}
                     onClick={() => {
                       setInput(suggestion);
-                      // Slight timeout to allow state update before submit if we wanted auto-submit
-                      // But just setting input is better UX usually
                     }}
                     className="p-4 rounded-xl border border-black/10 dark:border-white/10 hover:border-black/30 dark:hover:border-white/30 hover:bg-black/5 dark:hover:bg-white/5 text-sm text-left transition-all"
                   >
