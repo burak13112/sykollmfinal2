@@ -1,0 +1,5 @@
+{
+  "name": "SykoLLM Interface",
+  "description": "A minimalist, high-contrast monochrome chat interface for SykoLLM Alpha.",
+  "requestFramePermissions": []
+}
